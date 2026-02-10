@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="100" fill="#080808"/>
+  <!-- Three macro rings -->
+  <!-- Protein ring (blue) -->
+  <circle cx="256" cy="256" r="180" fill="none" stroke="#1a1a1a" stroke-width="36"/>
+  <circle cx="256" cy="256" r="180" fill="none" stroke="#60a5fa" stroke-width="36"
+    stroke-dasharray="339 565" stroke-linecap="round"
+    transform="rotate(-90 256 256)"/>
+  <!-- Carbs ring (orange) -->
+  <circle cx="256" cy="256" r="130" fill="none" stroke="#1a1a1a" stroke-width="36"/>
+  <circle cx="256" cy="256" r="130" fill="none" stroke="#fb923c" stroke-width="36"
+    stroke-dasharray="285 816" stroke-linecap="round"
+    transform="rotate(-90 256 256)"/>
+  <!-- Fat ring (purple) -->
+  <circle cx="256" cy="256" r="80" fill="none" stroke="#1a1a1a" stroke-width="36"/>
+  <circle cx="256" cy="256" r="80" fill="none" stroke="#a855f7" stroke-width="36"
+    stroke-dasharray="180 502" stroke-linecap="round"
+    transform="rotate(-90 256 256)"/>
+</svg>
