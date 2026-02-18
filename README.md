@@ -1,16 +1,52 @@
-# React + Vite
+# Macro Tracker v2
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Personal nutrition tracker with per-user auth, real-time Supabase sync, and a clean dark UI. Tracks daily macros against configurable targets, logs activity calories, and calculates cut deficit progress.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Magic link auth** — Supabase email auth, no passwords, per-user data isolation via RLS
+- **Macro rings** — SVG progress rings for protein, carbs, fat vs. daily targets
+- **Calorie summary** — eaten vs. BMR, baseline delta, cut target, cut remaining
+- **Cut deficit calculator** — configurable deficit with inline editing
+- **Food database** — categorised food DB (Protein, Carbs, Fats, Veg, Flavor, Beverages)
+- **Custom food entry** — add any food by name, kcal/100g, grams eaten, protein/carbs/fat
+- **Activity logging** — log activity with kcal burned, adds to daily budget
+- **14-day history log** — scrollable history with per-day macro breakdown
+- **CSV export** — daily / week / month / YTD with baseline delta column
+- **JPEG export** — screenshot current state via html2canvas
+- **Auto backup** — triggers at 20:00 and on page unload
+- **Data import** — paste JSON from localStorage to migrate from older versions
 
-## React Compiler
+## Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- React 18 + Vite
+- Supabase (Postgres + Auth + RLS)
+- html2canvas
 
-## Expanding the ESLint configuration
+## Run locally
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm install
+npm run dev
+```
+
+Requires a Supabase project with a `macro_history` table and RLS enabled:
+
+```sql
+create table macro_history (
+  id text primary key,
+  data jsonb,
+  updated_at timestamptz default now()
+);
+
+alter table macro_history enable row level security;
+
+create policy "users own their data" on macro_history
+  for all using (auth.uid()::text = id);
+```
+
+Add your Supabase URL and anon key to `src/supabaseClient.js`.
+
+## Live demo
+
+[macro-tracker-ofir.netlify.app](https://ornate-toffee-0ef2e9.netlify.app) — sign in required (magic link email)
