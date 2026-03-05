@@ -1,5 +1,7 @@
 # Macro Tracker v2
 
+![Macro Tracker](./public/screenshot.jpg)
+
 Personal nutrition tracker with per-user auth, real-time Supabase sync, and a clean dark UI. Tracks daily macros against configurable targets, logs activity calories, and calculates cut deficit progress.
 
 ## Features
