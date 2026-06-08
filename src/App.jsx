@@ -411,7 +411,7 @@ function MacroTrackerApp({ user }) {
   }
 
   // ── Totals ───────────────────────────────────────────────────────────────
-  const foodTotals = useMemo(() => state.food.reduce(
+  const foodTotals = useMemo(() => (state.food ?? []).reduce(
     (acc, i) => {
       const f = i.grams / 100;
       acc.kcal    += i.kcal    * f;
@@ -424,7 +424,7 @@ function MacroTrackerApp({ user }) {
   ), [state.food]);
 
   const activityTotal = useMemo(
-    () => state.activity.reduce((acc, a) => acc + a.kcal, 0),
+    () => (state.activity ?? []).reduce((acc, a) => acc + a.kcal, 0),
     [state.activity]
   );
 
@@ -448,12 +448,12 @@ function MacroTrackerApp({ user }) {
   function computeDayTotals(dayState) {
     let t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
     let activity = 0;
-    dayState.food.forEach(i => {
+    (dayState.food ?? []).forEach(i => {
       const f = i.grams / 100;
       t.kcal += i.kcal * f; t.protein += i.protein * f;
       t.carbs += i.carbs * f; t.fat += i.fat * f;
     });
-    dayState.activity.forEach(a => (activity += a.kcal));
+    (dayState.activity ?? []).forEach(a => (activity += a.kcal));
     return { ...t, activity, delta: mbr + activity - t.kcal };
   }
 
