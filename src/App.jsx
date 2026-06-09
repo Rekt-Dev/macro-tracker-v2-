@@ -327,7 +327,7 @@ function MacroTrackerApp({ user }) {
     scheduleSave();
   }, [height]);
 
-  const updateToday = (newState) => setHistory(h => ({ ...h, [today]: newState }));
+  const updateToday = (newState) => setHistory(h => ({ ...h, [today]: { ...newState, cutPct } }));
 
   // ── Auto-backup at 20:00 ─────────────────────────────────────────────────
   useEffect(() => {
@@ -527,7 +527,20 @@ function MacroTrackerApp({ user }) {
   })();
 
   // ── History entries for log tab ───────────────────────────────────────────
-  const historyDays = Object.keys(history).sort().reverse().slice(0, 14);
+  const [logMode, setLogMode] = useState("rolling"); // "rolling" | "calendar"
+  const [logMonth, setLogMonth] = useState(() => today.slice(0, 7));
+  const allMonths = useMemo(() =>
+    [...new Set(Object.keys(history).map(d => d.slice(0, 7)))].sort().reverse()
+  , [history]);
+  const historyDays = useMemo(() => {
+    if (logMode === "calendar") {
+      return Object.keys(history).filter(d => d.startsWith(logMonth)).sort().reverse();
+    }
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 29);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    return Object.keys(history).filter(d => d >= cutoffStr).sort().reverse();
+  }, [history, logMode, logMonth]);
 
   const cutColor = cutRemaining >= 0 ? "#4ade80" : "#f87171";
 
@@ -688,7 +701,7 @@ function MacroTrackerApp({ user }) {
       <div style={A.tabs}>
         {["today","log"].map(t => (
           <button key={t} style={{ ...A.tab, ...(tab===t ? A.tabActive : {}) }} onClick={() => setTab(t)}>
-            {t === "today" ? "Today" : "14-day log"}
+            {t === "today" ? "Today" : "Log"}
           </button>
         ))}
       </div>
@@ -846,18 +859,34 @@ function MacroTrackerApp({ user }) {
           </div>
         </>
       ) : (
-        /* ── 14-day log ── */
+        /* ── monthly log ── */
         <div style={A.card}>
-          <div style={A.cardTitle}>14-day history</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+            <div style={A.cardTitle}>{logMode === "rolling" ? "last 30 days" : logMonth}</div>
+            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+              {logMode === "calendar" && allMonths.filter(m => m !== logMonth).map(m => (
+                <button key={m} onClick={() => setLogMonth(m)}
+                  style={{ background:"#1a1a1a", border:"1px solid #252525", color:"#64748b", borderRadius:6, padding:"3px 8px", fontSize:10, cursor:"pointer", fontFamily:"inherit" }}>
+                  {m}
+                </button>
+              ))}
+              <button onClick={() => setLogMode(m => m === "rolling" ? "calendar" : "rolling")}
+                style={{ background:"none", border:"none", color:"#475569", fontSize:11, cursor:"pointer", fontFamily:"inherit", textDecoration:"underline", padding:0 }}>
+                {logMode === "rolling" ? "by month" : "rolling"}
+              </button>
+            </div>
+          </div>
           {historyDays.length === 0 ? (
             <div style={{ textAlign:"center", padding:"24px 0" }}>
               <div style={{ color:"#475569", fontSize:13, marginBottom:8 }}>No history found.</div>
               <div style={{ color:"#334155", fontSize:12 }}>Tap 📥 above → paste your old data to import.</div>
             </div>
-          ) : [0, 1].map(chunk => {
+          ) : Array.from({ length: Math.ceil(historyDays.length / 7) }, (_, chunk) => {
             const days = historyDays.slice(chunk * 7, chunk * 7 + 7);
             if (!days.length) return null;
-            const weeklyTarget  = cutDeficit * days.length;
+            const chunkPct      = history[days[days.length - 1]]?.cutPct ?? cutPct;
+            const chunkDeficit  = Math.round(bodyWeight * (chunkPct / 100) * 7700 / 7);
+            const weeklyTarget  = chunkDeficit * days.length;
             const actualDeficit = days.reduce((acc, date) => {
               const t = computeDayTotals(history[date]);
               // deficit created = mbr + activity - kcal (baseline delta)
@@ -887,7 +916,7 @@ function MacroTrackerApp({ user }) {
                 })}
                 <div style={{ background:"#111", borderRadius:8, padding:"10px 12px", margin:"8px 0 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div style={{ fontSize:11, color:"#475569" }}>
-                    Week {chunk + 1} · target <span style={{ color:"#64748b" }}>{weeklyTarget.toFixed(0)}</span>
+                    Week {chunk + 1} · <span style={{ color:"#64748b" }}>{chunkPct}% · target {weeklyTarget.toFixed(0)}</span>
                   </div>
                   <div style={{ fontSize:13, fontWeight:700, color:diffColor }}>{diffLabel}</div>
                 </div>
