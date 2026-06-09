@@ -923,6 +923,25 @@ function MacroTrackerApp({ user }) {
               </div>
             );
           })}
+          {historyDays.length > 0 && (() => {
+            const totalActual = historyDays.reduce((acc, date) => acc + computeDayTotals(history[date]).delta, 0);
+            const totalTarget = historyDays.reduce((acc, date) => {
+              const pct = history[date]?.cutPct ?? cutPct;
+              return acc + Math.round(bodyWeight * (pct / 100) * 7700 / 7);
+            }, 0);
+            const totalDiff = Math.round(totalActual - totalTarget);
+            const tc = totalDiff >= 0 ? "#4ade80" : "#f87171";
+            return (
+              <div style={{ borderTop:"1px solid #1a1a1a", marginTop:8, paddingTop:12, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={{ fontSize:11, color:"#475569" }}>
+                  {historyDays.length}-day total · target <span style={{ color:"#64748b" }}>{totalTarget.toLocaleString()}</span>
+                </div>
+                <div style={{ fontSize:14, fontWeight:800, color:tc }}>
+                  {totalDiff >= 0 ? "+" : ""}{totalDiff.toLocaleString()} {totalDiff >= 0 ? "above" : "below"} protocol
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
