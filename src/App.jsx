@@ -193,7 +193,8 @@ function MacroTrackerApp({ user }) {
   const [customProtein, setCustomProtein] = useState("");
   const [customCarbs,   setCustomCarbs]   = useState("");
   const [customFat,     setCustomFat]     = useState("");
-  const [mbr,    setMbr]    = useState(2330);
+  const [age,    setAge]    = useState(() => Number(localStorage.getItem("macro_age"))    || 50);
+  const [height, setHeight] = useState(() => Number(localStorage.getItem("macro_height")) || 183);
   const [activityName, setActivityName] = useState("");
   const [activityKcal, setActivityKcal] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
@@ -204,10 +205,10 @@ function MacroTrackerApp({ user }) {
   const [tab,        setTab]        = useState("today");
   const [syncing,    setSyncing]    = useState(false);
   const [loading,    setLoading]    = useState(true);
-  const [cutDeficit, setCutDeficit] = useState(() => Number(localStorage.getItem("macro_cut_deficit")) || 730);
+  const [cutPct, setCutPct] = useState(() => Number(localStorage.getItem("macro_cut_pct")) || 0.7);
   const [editingCut, setEditingCut] = useState(false);
-  const cutDeficitRef = useRef(Number(localStorage.getItem("macro_cut_deficit")) || 730);
-  const mbrRef        = useRef(2330);
+  const cutDeficitRef = useRef(0);
+  const mbrRef        = useRef(0);
 
   const bodyRef      = useRef(null);
   const saveTimer    = useRef(null);
@@ -241,8 +242,9 @@ function MacroTrackerApp({ user }) {
         data: {
           history:    historyRef.current,
           bodyWeight: bwRef.current,
-          cutDeficit: cutDeficitRef.current,
-          mbr:        mbrRef.current,
+          cutPct:     Number(localStorage.getItem("macro_cut_pct")) || 0.7,
+          age:        Number(localStorage.getItem("macro_age"))     || 50,
+          height:     Number(localStorage.getItem("macro_height"))  || 183,
         },
         updated_at: new Date().toISOString(),
       }, { onConflict: "id" });
@@ -269,8 +271,9 @@ function MacroTrackerApp({ user }) {
 
           const remoteHistory   = isHistory ? remote : {};
           const remoteBW        = blob.bodyWeight  ?? null;
-          const remoteCut       = blob.cutDeficit  ?? null;
-          const remoteMbr       = blob.mbr         ?? null;
+          const remoteCut       = blob.cutPct       ?? null;
+          const remoteAge       = blob.age        ?? null;
+          const remoteHeight    = blob.height     ?? null;
 
           // remote is always source of truth — local only fills days remote doesn't have
           const merged = { ...historyRef.current, ...remoteHistory };
@@ -278,9 +281,10 @@ function MacroTrackerApp({ user }) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
           setHistory(merged);
 
-          if (remoteBW)  { bwRef.current = remoteBW; localStorage.setItem(BW_KEY, remoteBW); setBodyWeight(remoteBW); }
-          if (remoteCut) { cutDeficitRef.current = remoteCut; localStorage.setItem("macro_cut_deficit", remoteCut); setCutDeficit(remoteCut); }
-          if (remoteMbr) { mbrRef.current = remoteMbr; setMbr(remoteMbr); }
+          if (remoteBW)     { bwRef.current = remoteBW; localStorage.setItem(BW_KEY, remoteBW); setBodyWeight(remoteBW); }
+          if (remoteCut)    { localStorage.setItem("macro_cut_pct", remoteCut); setCutPct(remoteCut); }
+          if (remoteAge)    { localStorage.setItem("macro_age", remoteAge); setAge(remoteAge); }
+          if (remoteHeight) { localStorage.setItem("macro_height", remoteHeight); setHeight(remoteHeight); }
         }
       } finally {
         setLoading(false);
@@ -306,17 +310,22 @@ function MacroTrackerApp({ user }) {
   }, [bodyWeight]);
 
   useEffect(() => {
-    cutDeficitRef.current = cutDeficit;
-    localStorage.setItem("macro_cut_deficit", cutDeficit);
+    localStorage.setItem("macro_cut_pct", cutPct);
     if (!initialized.current) return;
     scheduleSave();
-  }, [cutDeficit]);
+  }, [cutPct]);
 
   useEffect(() => {
-    mbrRef.current = mbr;
+    localStorage.setItem("macro_age", age);
     if (!initialized.current) return;
     scheduleSave();
-  }, [mbr]);
+  }, [age]);
+
+  useEffect(() => {
+    localStorage.setItem("macro_height", height);
+    if (!initialized.current) return;
+    scheduleSave();
+  }, [height]);
 
   const updateToday = (newState) => setHistory(h => ({ ...h, [today]: newState }));
 
@@ -428,20 +437,27 @@ function MacroTrackerApp({ user }) {
     [state.activity]
   );
 
+  // ── Dynamic TDEE (Mifflin-St Jeor × 1.2 sedentary) ─────────────────────────
+  const mbr = useMemo(() =>
+    Math.round((10 * bodyWeight + 6.25 * height - 5 * age + 5) * 1.2),
+    [bodyWeight, height, age]
+  );
+
   const proteinTarget = Math.max(160, bodyWeight * 1.8);
   const carbTarget    = bodyWeight * 4;
   const fatTarget     = bodyWeight * 0.8;
 
+  // cutDeficit auto-calculates from protocol % × bodyweight
+  const cutDeficit   = useMemo(() => Math.round(bodyWeight * (cutPct / 100) * 7700 / 7), [bodyWeight, cutPct]);
+  const cutTarget    = mbr - cutDeficit;
   const baselineDelta = mbr + activityTotal - foodTotals.kcal;
-  const cutTarget     = mbr - cutDeficit;
   const cutRemaining  = cutTarget + activityTotal - foodTotals.kcal;
 
   function changeCutDeficit(delta) {
-    setCutDeficit(v => {
-      const next = Math.max(0, v + delta);
-      localStorage.setItem("macro_cut_deficit", next);
-      return next;
-    });
+    // shift by ~10 kcal → back-calculate new %
+    const newDeficit = Math.max(0, cutDeficit + delta);
+    const newPct = (newDeficit * 7 / (bodyWeight * 7700)) * 100;
+    setCutPct(Math.round(newPct * 100) / 100);
   }
 
   // ── CSV export ────────────────────────────────────────────────────────────
@@ -454,7 +470,7 @@ function MacroTrackerApp({ user }) {
       t.carbs += i.carbs * f; t.fat += i.fat * f;
     });
     (dayState.activity ?? []).forEach(a => (activity += a.kcal));
-    return { ...t, activity, delta: mbr + activity - t.kcal };
+    return { ...t, activity, delta: mbr + activity - t.kcal, cutRemaining: cutTarget + activity - t.kcal };
   }
 
   function exportAllCSV(mode = "all") {
@@ -583,20 +599,31 @@ function MacroTrackerApp({ user }) {
       {showSettings && (
         <div style={A.settingsPanel}>
           <div style={A.settingsRow}>
-            <label style={A.settingsLabel}>BMR (kcal)</label>
-            <div style={A.settingsInputRow}>
-              <button style={A.step} onClick={() => setMbr(v => v - 10)}>−</button>
-              <input type="number" value={mbr} onChange={e => setMbr(+e.target.value)} style={A.settingsInput} />
-              <button style={A.step} onClick={() => setMbr(v => v + 10)}>+</button>
-            </div>
-          </div>
-          <div style={A.settingsRow}>
             <label style={A.settingsLabel}>Body Weight (kg)</label>
             <div style={A.settingsInputRow}>
               <button style={A.step} onClick={() => setBodyWeight(v => Math.max(40, v - 0.5))}>−</button>
               <input type="number" value={bodyWeight} onChange={e => setBodyWeight(+e.target.value)} style={A.settingsInput} />
               <button style={A.step} onClick={() => setBodyWeight(v => v + 0.5)}>+</button>
             </div>
+          </div>
+          <div style={A.settingsRow}>
+            <label style={A.settingsLabel}>Height (cm)</label>
+            <div style={A.settingsInputRow}>
+              <button style={A.step} onClick={() => setHeight(v => v - 1)}>−</button>
+              <input type="number" value={height} onChange={e => setHeight(+e.target.value)} style={A.settingsInput} />
+              <button style={A.step} onClick={() => setHeight(v => v + 1)}>+</button>
+            </div>
+          </div>
+          <div style={A.settingsRow}>
+            <label style={A.settingsLabel}>Age</label>
+            <div style={A.settingsInputRow}>
+              <button style={A.step} onClick={() => setAge(v => v - 1)}>−</button>
+              <input type="number" value={age} onChange={e => setAge(+e.target.value)} style={A.settingsInput} />
+              <button style={A.step} onClick={() => setAge(v => v + 1)}>+</button>
+            </div>
+          </div>
+          <div style={{ fontSize:11, color:"#475569", marginTop:8 }}>
+            TDEE: <span style={{ color:"#94a3b8" }}>{mbr} kcal</span> (Mifflin × 1.2 sedentary)
           </div>
         </div>
       )}
@@ -623,9 +650,10 @@ function MacroTrackerApp({ user }) {
                     type="number"
                     value={cutTarget}
                     onChange={e => {
-                      const next = Math.max(0, mbr - Number(e.target.value));
-                      setCutDeficit(next);
-                      localStorage.setItem("macro_cut_deficit", next);
+                      const newTarget = Number(e.target.value);
+                      const newDeficit = Math.max(0, mbr - newTarget);
+                      const newPct = (newDeficit * 7 / (bodyWeight * 7700)) * 100;
+                      setCutPct(Math.round(newPct * 100) / 100);
                     }}
                     onBlur={() => setEditingCut(false)}
                     style={{ ...A.calVal, color:"#60a5fa", background:"transparent", border:"none", borderBottom:"1px solid #60a5fa", width:50, textAlign:"right", outline:"none", fontFamily:"inherit" }}
@@ -633,6 +661,7 @@ function MacroTrackerApp({ user }) {
                 : <span style={A.calVal} onClick={() => setEditingCut(true)}>{cutTarget.toFixed(0)}</span>
               }
               <button style={A.cutArrow} onClick={() => changeCutDeficit(-10)}>▼</button>
+              <span style={{ fontSize:10, color:"#475569", marginLeft:2 }}>{cutPct.toFixed(2)}%</span>
             </div>
           </div>
           <div style={A.calRow}>
@@ -825,18 +854,42 @@ function MacroTrackerApp({ user }) {
               <div style={{ color:"#475569", fontSize:13, marginBottom:8 }}>No history found.</div>
               <div style={{ color:"#334155", fontSize:12 }}>Tap 📥 above → paste your old data to import.</div>
             </div>
-          ) : historyDays.map(date => {
-            const t = computeDayTotals(history[date]);
-            const dc = t.delta >= 0 ? "#4ade80" : "#f87171";
+          ) : [0, 1].map(chunk => {
+            const days = historyDays.slice(chunk * 7, chunk * 7 + 7);
+            if (!days.length) return null;
+            const weeklyTarget  = cutDeficit * days.length;
+            const actualDeficit = days.reduce((acc, date) => {
+              const t = computeDayTotals(history[date]);
+              // deficit created = mbr + activity - kcal (baseline delta)
+              return acc + t.delta;
+            }, 0);
+            const diff      = Math.round(actualDeficit - weeklyTarget);
+            const diffColor = diff >= 0 ? "#4ade80" : "#f87171";
+            const diffLabel = diff >= 0 ? `+${diff} above protocol` : `${diff} below protocol`;
             return (
-              <div key={date} style={A.histRow}>
-                <div style={A.histDate}>{date}</div>
-                <div style={A.histMacros}>
-                  <span>{t.kcal.toFixed(0)} kcal</span>
-                  <span style={{ color:"#93c5fd" }}>{t.protein.toFixed(0)}p</span>
-                  <span style={{ color:"#fdba74" }}>{t.carbs.toFixed(0)}c</span>
-                  <span style={{ color:"#c4b5fd" }}>{t.fat.toFixed(0)}f</span>
-                  <span style={{ color:dc, fontWeight:600 }}>{t.delta > 0 ? "+" : ""}{t.delta.toFixed(0)}</span>
+              <div key={chunk}>
+                {days.map(date => {
+                  const t = computeDayTotals(history[date]);
+                  const dc = t.delta >= 0 ? "#4ade80" : "#f87171";
+                  return (
+                    <div key={date} style={A.histRow}>
+                      <div style={A.histDate}>{date}</div>
+                      <div style={A.histMacros}>
+                        <span>{t.kcal.toFixed(0)} kcal</span>
+                        <span style={{ color:"#93c5fd" }}>{t.protein.toFixed(0)}p</span>
+                        <span style={{ color:"#fdba74" }}>{t.carbs.toFixed(0)}c</span>
+                        <span style={{ color:"#c4b5fd" }}>{t.fat.toFixed(0)}f</span>
+                        {t.activity > 0 && <span style={{ color:"#60a5fa" }}>🔥{t.activity.toFixed(0)}</span>}
+                        <span style={{ color:dc, fontWeight:600 }}>{t.delta > 0 ? "+" : ""}{t.delta.toFixed(0)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ background:"#111", borderRadius:8, padding:"10px 12px", margin:"8px 0 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div style={{ fontSize:11, color:"#475569" }}>
+                    Week {chunk + 1} · target <span style={{ color:"#64748b" }}>{weeklyTarget.toFixed(0)}</span>
+                  </div>
+                  <div style={{ fontSize:13, fontWeight:700, color:diffColor }}>{diffLabel}</div>
                 </div>
               </div>
             );
