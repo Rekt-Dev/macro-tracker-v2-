@@ -21,8 +21,12 @@ const FOOD_DB = {
     peasoup:    { name: "Pea soup",        kcal: 85,  protein: 6,   carbs: 14, fat: 0.45 },
     oats:       { name: "Oats",            kcal: 389, protein: 17,  carbs: 66, fat: 7    },
     potatoes:   { name: "Potatoes",        kcal: 80,  protein: 2,   carbs: 18, fat: 0    },
-    popcorn:    { name: "Popcorn",         kcal: 652, protein: 11,  carbs: 78, fat: 34   },
+    Oiledpopcorn:    { name: "Oil Popcorn",  kcal: 652, protein: 11,  carbs: 78, fat: 34   },
+    MicrodPopcorn:  { name: "MicroPopcorn",  kcal: 387, protein: 13,   carbs: 78, fat: 4.5   },
+
     datesyrup:  { name: "Date syrup",      kcal: 300, protein: 0,   carbs: 80, fat: 0    },
+    VanillaPudding:   { name: "VanillaPuddingPowder",  kcal: 364,  protein: 0,   carbs: 91, fat: 0    },
+    ChocoPudding:   { name: "ChocPuddingPowder",   kcal: 359,  protein: 3.3,   carbs: 83, fat: 1.5    },
   },
   Fats: {
     tahini:      { name: "Tahini",        kcal: 600, protein: 17, carbs: 21, fat: 53  },
@@ -42,6 +46,7 @@ const FOOD_DB = {
   },
   Flavor: {
     ketchup: { name: "Ketchup", kcal: 100, protein: 0, carbs: 5, fat: 0 },
+    Chilli:  { name: "Chilli",  kcal: 87, protein: 0, carbs: 21.8, fat: 0 },
     amba:    { name: "Amba",    kcal: 25,  protein: 0, carbs: 6, fat: 0 },
     schug:   { name: "Schug",   kcal: 10,  protein: 0, carbs: 2, fat: 0 },
   },
@@ -55,6 +60,10 @@ const FOOD_DB = {
 
 const STORAGE_KEY = "macro_v9";
 const BW_KEY      = "macro_bw_v1";
+// dev-only: on localhost `npm run dev`, skip the magic-link login and work
+// from localStorage only (never touches the Supabase cloud row). Always false
+// in the production build that goes to Netlify, so real login still required.
+const DEV_NOAUTH  = import.meta.env.DEV;
 const todayKey    = () => new Date().toISOString().slice(0, 10);
 
 // ── SVG Ring ─────────────────────────────────────────────────────────────────
@@ -175,9 +184,9 @@ export default function MacroTrackerV2() {
     </div>
   );
 
-  if (!user) return <LoginScreen />;
+  if (!user && !DEV_NOAUTH) return <LoginScreen />;
 
-  return <MacroTrackerApp user={user} />;
+  return <MacroTrackerApp user={user ?? { id: "local-dev" }} />;
 }
 
 function MacroTrackerApp({ user }) {
@@ -234,6 +243,7 @@ function MacroTrackerApp({ user }) {
   const state = history[today] || { food: [], activity: [] };
 
   function scheduleSave() {
+    if (user.id === "local-dev") return; // localStorage-only in dev preview; effects already persisted it
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       setSyncing(true);
@@ -255,6 +265,7 @@ function MacroTrackerApp({ user }) {
   // ── Load from Supabase on mount — block render until done ────────────────
   useEffect(() => {
     async function loadFromSupabase() {
+      if (user.id === "local-dev") { setLoading(false); initialized.current = true; return; } // dev preview: localStorage only
       try {
         const { data, error } = await supabase
           .from("macro_history")
@@ -329,22 +340,6 @@ function MacroTrackerApp({ user }) {
 
   const updateToday = (newState) => setHistory(h => ({ ...h, [today]: { ...newState, cutPct } }));
 
-  // ── Auto-backup at 20:00 ─────────────────────────────────────────────────
-  useEffect(() => {
-    const iv = setInterval(() => {
-      const now = new Date();
-      if (now.getHours() === 20 && now.getMinutes() === 0) {
-        doBackup();
-      }
-    }, 60000);
-    return () => clearInterval(iv);
-  }, [history]);
-
-  useEffect(() => {
-    const handler = () => doBackup();
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [history]);
 
   function importData() {
     try {
@@ -368,18 +363,6 @@ function MacroTrackerApp({ user }) {
     }
   }
 
-  async function doBackup() {
-    exportAllCSV("all");
-    try {
-      const canvas = await html2canvas(document.body, { backgroundColor:"#080808", scale:1.5, logging:false });
-      canvas.toBlob(blob => {
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `macro-backup-${new Date().toISOString().replace(/[:.]/g,"-")}.jpg`;
-        a.click();
-      }, "image/jpeg", 0.9);
-    } catch {}
-  }
 
   // ── Food actions ─────────────────────────────────────────────────────────
   function addFood() {
@@ -544,6 +527,10 @@ function MacroTrackerApp({ user }) {
 
   const cutColor = cutRemaining >= 0 ? "#4ade80" : "#f87171";
 
+  // fat lost (or gained) as % of current bodyweight: deficit kcal → kg fat (÷7700) → % of BW
+  const fatPctBW = (deficitKcal) =>
+    bodyWeight > 0 ? (deficitKcal / 7700 / bodyWeight) * 100 : 0;
+
   if (loading) return (
     <div style={{ minHeight:"100dvh", display:"flex", alignItems:"center", justifyContent:"center", background:"#080808", color:"#475569", fontFamily:"inherit", fontSize:13 }}>
       syncing…
@@ -556,7 +543,7 @@ function MacroTrackerApp({ user }) {
       {/* ── Header ── */}
       <div style={A.header}>
         <div>
-          <div style={A.title}>MACRO TRACKER</div>
+          <div style={A.title}>MACRO TRACKER v3</div>
           <div style={A.date}>{new Date().toLocaleDateString("en-IL", { weekday:"long", day:"numeric", month:"long" })}</div>
         </div>
         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
@@ -886,10 +873,10 @@ function MacroTrackerApp({ user }) {
             if (!days.length) return null;
             const chunkPct      = history[days[days.length - 1]]?.cutPct ?? cutPct;
             const chunkDeficit  = Math.round(bodyWeight * (chunkPct / 100) * 7700 / 7);
-            const weeklyTarget  = chunkDeficit * days.length;
-            const actualDeficit = days.reduce((acc, date) => {
+            const activeDays = days.filter(date => computeDayTotals(history[date]).kcal > 0);
+            const weeklyTarget = chunkDeficit * activeDays.length;
+            const actualDeficit = activeDays.reduce((acc, date) => {
               const t = computeDayTotals(history[date]);
-              // deficit created = mbr + activity - kcal (baseline delta)
               return acc + t.delta;
             }, 0);
             const diff      = Math.round(actualDeficit - weeklyTarget);
@@ -909,35 +896,52 @@ function MacroTrackerApp({ user }) {
                         <span style={{ color:"#fdba74" }}>{t.carbs.toFixed(0)}c</span>
                         <span style={{ color:"#c4b5fd" }}>{t.fat.toFixed(0)}f</span>
                         {t.activity > 0 && <span style={{ color:"#60a5fa" }}>🔥{t.activity.toFixed(0)}</span>}
-                        <span style={{ color:dc, fontWeight:600 }}>{t.delta > 0 ? "+" : ""}{t.delta.toFixed(0)}</span>
+                        {t.kcal > 0 && <span style={{ color:dc, fontWeight:600 }} title="deficit from TDEE · kg fat · % of bodyweight">{t.delta > 0 ? "+" : ""}{t.delta.toFixed(0)} def · {(t.delta / 7700).toFixed(2)}kg · {fatPctBW(t.delta).toFixed(2)}%</span>}
                       </div>
                     </div>
                   );
                 })}
-                <div style={{ background:"#111", borderRadius:8, padding:"10px 12px", margin:"8px 0 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                  <div style={{ fontSize:11, color:"#475569" }}>
-                    Week {chunk + 1} · <span style={{ color:"#64748b" }}>{chunkPct}% · target {weeklyTarget.toFixed(0)}</span>
+                <div style={{ background:"#111", borderRadius:8, padding:"10px 12px", margin:"8px 0 14px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div style={{ fontSize:11, color:"#475569" }}>
+                      Week {chunk + 1} · <span style={{ color:"#64748b" }}>{chunkPct}% · target {weeklyTarget.toFixed(0)}</span>
+                    </div>
+                    <div style={{ fontSize:13, fontWeight:700, color:diffColor }}>{diffLabel}</div>
                   </div>
-                  <div style={{ fontSize:13, fontWeight:700, color:diffColor }}>{diffLabel}</div>
+                  <div style={{ marginTop:6, fontSize:12, color:"#64748b" }}>
+                    Total deficit: <span style={{ color: actualDeficit >= 0 ? "#4ade80" : "#f87171", fontWeight:700 }}>{Math.round(actualDeficit).toLocaleString()} kcal</span>
+                    <span style={{ color:"#334155", marginLeft:6 }}>≈ {(actualDeficit / 7700).toFixed(2)} kg fat · {fatPctBW(actualDeficit) >= 0 ? "+" : ""}{fatPctBW(actualDeficit).toFixed(2)}% BW</span>
+                  </div>
                 </div>
               </div>
             );
           })}
           {historyDays.length > 0 && (() => {
-            const totalActual = historyDays.reduce((acc, date) => acc + computeDayTotals(history[date]).delta, 0);
-            const totalTarget = historyDays.reduce((acc, date) => {
+            const activeTotalDays = historyDays.filter(d => computeDayTotals(history[d]).kcal > 0);
+            const totalActual = activeTotalDays.reduce((acc, date) => acc + computeDayTotals(history[date]).delta, 0);
+            const totalTarget = activeTotalDays.reduce((acc, date) => {
               const pct = history[date]?.cutPct ?? cutPct;
               return acc + Math.round(bodyWeight * (pct / 100) * 7700 / 7);
             }, 0);
             const totalDiff = Math.round(totalActual - totalTarget);
             const tc = totalDiff >= 0 ? "#4ade80" : "#f87171";
+            const totalActualRounded = Math.round(totalActual);
             return (
-              <div style={{ borderTop:"1px solid #1a1a1a", marginTop:8, paddingTop:12, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <div style={{ fontSize:11, color:"#475569" }}>
-                  {historyDays.length}-day total · target <span style={{ color:"#64748b" }}>{totalTarget.toLocaleString()}</span>
+              <div style={{ borderTop:"1px solid #1a1a1a", marginTop:8, paddingTop:12 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                  <div style={{ fontSize:11, color:"#475569" }}>
+                    {historyDays.length}-day total · target <span style={{ color:"#64748b" }}>{totalTarget.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize:14, fontWeight:800, color:tc }}>
+                    {totalDiff >= 0 ? "+" : ""}{totalDiff.toLocaleString()} {totalDiff >= 0 ? "above" : "below"} protocol
+                  </div>
                 </div>
-                <div style={{ fontSize:14, fontWeight:800, color:tc }}>
-                  {totalDiff >= 0 ? "+" : ""}{totalDiff.toLocaleString()} {totalDiff >= 0 ? "above" : "below"} protocol
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div style={{ fontSize:11, color:"#475569" }}>total deficit from TDEE</div>
+                  <div style={{ fontSize:15, fontWeight:800, color: totalActualRounded >= 0 ? "#4ade80" : "#f87171" }}>
+                    {totalActualRounded.toLocaleString()} kcal
+                    <span style={{ fontSize:11, fontWeight:400, color:"#475569", marginLeft:8 }}>≈ {(totalActual / 7700).toFixed(2)} kg fat · {fatPctBW(totalActual) >= 0 ? "+" : ""}{fatPctBW(totalActual).toFixed(2)}% BW</span>
+                  </div>
                 </div>
               </div>
             );
