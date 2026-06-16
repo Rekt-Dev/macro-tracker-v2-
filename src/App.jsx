@@ -65,6 +65,13 @@ const BW_KEY      = "macro_bw_v1";
 // in the production build that goes to Netlify, so real login still required.
 const DEV_NOAUTH  = import.meta.env.DEV;
 const todayKey    = () => new Date().toISOString().slice(0, 10);
+// local clock time the food was logged, in the given IANA timezone, e.g. "14:30" (24h)
+const DEFAULT_TZ  = "Asia/Jerusalem";
+const nowTime     = (tz = DEFAULT_TZ) => new Date().toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" });
+// full IANA timezone list for the settings picker (fallback if the runtime lacks supportedValuesOf)
+const TIMEZONES   = (typeof Intl.supportedValuesOf === "function")
+  ? Intl.supportedValuesOf("timeZone")
+  : ["Asia/Jerusalem", "UTC", "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles"];
 
 // ── SVG Ring ─────────────────────────────────────────────────────────────────
 const R  = 38;
@@ -204,6 +211,7 @@ function MacroTrackerApp({ user }) {
   const [customFat,     setCustomFat]     = useState("");
   const [age,    setAge]    = useState(() => Number(localStorage.getItem("macro_age"))    || 50);
   const [height, setHeight] = useState(() => Number(localStorage.getItem("macro_height")) || 183);
+  const [timezone, setTimezone] = useState(() => localStorage.getItem("macro_tz") || DEFAULT_TZ);
   const [activityName, setActivityName] = useState("");
   const [activityKcal, setActivityKcal] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
@@ -255,6 +263,7 @@ function MacroTrackerApp({ user }) {
           cutPct:     Number(localStorage.getItem("macro_cut_pct")) || 0.7,
           age:        Number(localStorage.getItem("macro_age"))     || 50,
           height:     Number(localStorage.getItem("macro_height"))  || 183,
+          timezone:   localStorage.getItem("macro_tz") || DEFAULT_TZ,
         },
         updated_at: new Date().toISOString(),
       }, { onConflict: "id" });
@@ -285,6 +294,7 @@ function MacroTrackerApp({ user }) {
           const remoteCut       = blob.cutPct       ?? null;
           const remoteAge       = blob.age        ?? null;
           const remoteHeight    = blob.height     ?? null;
+          const remoteTz        = blob.timezone   ?? null;
 
           // remote is always source of truth — local only fills days remote doesn't have
           const merged = { ...historyRef.current, ...remoteHistory };
@@ -296,6 +306,7 @@ function MacroTrackerApp({ user }) {
           if (remoteCut)    { localStorage.setItem("macro_cut_pct", remoteCut); setCutPct(remoteCut); }
           if (remoteAge)    { localStorage.setItem("macro_age", remoteAge); setAge(remoteAge); }
           if (remoteHeight) { localStorage.setItem("macro_height", remoteHeight); setHeight(remoteHeight); }
+          if (remoteTz)     { localStorage.setItem("macro_tz", remoteTz); setTimezone(remoteTz); }
         }
       } finally {
         setLoading(false);
@@ -338,6 +349,12 @@ function MacroTrackerApp({ user }) {
     scheduleSave();
   }, [height]);
 
+  useEffect(() => {
+    localStorage.setItem("macro_tz", timezone);
+    if (!initialized.current) return;
+    scheduleSave();
+  }, [timezone]);
+
   const updateToday = (newState) => setHistory(h => ({ ...h, [today]: { ...newState, cutPct } }));
 
 
@@ -367,7 +384,7 @@ function MacroTrackerApp({ user }) {
   // ── Food actions ─────────────────────────────────────────────────────────
   function addFood() {
     const item = FOOD_DB[group][food];
-    updateToday({ ...state, food: [...state.food, { ...item, grams }] });
+    updateToday({ ...state, food: [...state.food, { ...item, grams, time: nowTime(timezone) }] });
   }
 
   function addCustomFood() {
@@ -380,6 +397,7 @@ function MacroTrackerApp({ user }) {
       carbs:   Number(customCarbs)   || 0,
       fat:     Number(customFat)     || 0,
       grams:   Number(customGrams),
+      time:    nowTime(timezone),
     };
     updateToday({ ...state, food: [...state.food, item] });
     setCustomName(""); setCustomKcal(""); setCustomGrams(100);
@@ -622,6 +640,19 @@ function MacroTrackerApp({ user }) {
               <button style={A.step} onClick={() => setAge(v => v + 1)}>+</button>
             </div>
           </div>
+          <div style={A.settingsRow}>
+            <label style={A.settingsLabel}>Timezone (log time)</label>
+            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{ fontSize:11, color:"#475569", fontFamily:"'DM Mono',monospace" }}>now {nowTime(timezone)}</span>
+              <select
+                value={timezone}
+                onChange={e => setTimezone(e.target.value)}
+                style={{ background:"#1a1a1a", border:"1px solid #252525", color:"#e2e8f0", borderRadius:8, padding:"8px 10px", fontSize:13, fontFamily:"inherit", maxWidth:170 }}
+              >
+                {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
+              </select>
+            </div>
+          </div>
           <div style={{ fontSize:11, color:"#475569", marginTop:8 }}>
             TDEE: <span style={{ color:"#94a3b8" }}>{mbr} kcal</span> (Mifflin × 1.2 sedentary)
           </div>
@@ -806,6 +837,7 @@ function MacroTrackerApp({ user }) {
                       <div style={A.foodName}>{item.name}</div>
                       <div style={A.foodMeta}>{item.grams}g · {(item.kcal * f).toFixed(0)} kcal · {(item.protein * f).toFixed(1)}p · {(item.carbs * f).toFixed(1)}c · {(item.fat * f).toFixed(1)}f</div>
                     </div>
+                    {item.time && <div style={A.foodTime}>{item.time}</div>}
                     <button onClick={() => removeFood(idx)} style={A.del}>✕</button>
                   </div>
                 );
@@ -1002,6 +1034,7 @@ const A = {
   foodLeft:  { flex:1 },
   foodName:  { fontSize:13, color:"#e2e8f0", fontWeight:500 },
   foodMeta:  { fontSize:11, color:"#64748b", marginTop:2 },
+  foodTime:  { fontSize:10, color:"#475569", fontFamily:"'DM Mono',monospace", flexShrink:0, marginRight:4 },
   del:       { background:"transparent", border:"none", color:"#475569", cursor:"pointer", fontSize:13, padding:"4px 6px", flexShrink:0 },
 
   histRow:   { padding:"10px 0", borderBottom:"1px solid #111" },
